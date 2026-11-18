@@ -153,6 +153,15 @@ class X4Client(private val ctx: Context) {
         postForm(host, "mkdir", "name" to name, "path" to parent)
     }
 
+    /** Crea la cartella se manca; se esiste gia' non e' un errore. */
+    suspend fun ensureDir(host: String, parent: String, name: String) {
+        try {
+            mkdir(host, parent, name)
+        } catch (e: IOException) {
+            if (e.message?.contains("already exists", ignoreCase = true) != true) throw e
+        }
+    }
+
     suspend fun delete(host: String, path: String, isDir: Boolean) {
         postForm(host, "delete", "path" to path, "type" to if (isDir) "folder" else "file")
     }

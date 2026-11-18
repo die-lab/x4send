@@ -13,6 +13,10 @@ class Prefs(ctx: Context) {
         get() = sp.getString("folder", "/") ?: "/"
         set(v) = sp.edit().putString("folder", v).apply()
 
+    var autoSort: Boolean
+        get() = sp.getBoolean("autoSort", true)
+        set(v) = sp.edit().putBoolean("autoSort", v).apply()
+
     var fast: Boolean
         get() = sp.getBoolean("fast", false)
         set(v) = sp.edit().putBoolean("fast", v).apply()

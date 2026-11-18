@@ -31,6 +31,7 @@ data class UploadJob(
     val sent: Long = 0,
     val error: String? = null,
     val millis: Long = 0,
+    val dest: String? = null,
 )
 
 class MainViewModel(app: Application) : AndroidViewModel(app) {
@@ -42,6 +43,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val host = MutableStateFlow(prefs.host)
     val folder = MutableStateFlow(prefs.folder)
     val fast = MutableStateFlow(prefs.fast)
+    val autoSort = MutableStateFlow(prefs.autoSort)
     val connection = MutableStateFlow("Non verificata")
     val jobs = MutableStateFlow<List<UploadJob>>(emptyList())
 
@@ -66,6 +68,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun setFast(v: Boolean) {
         fast.value = v
         prefs.fast = v
+    }
+
+    fun setAutoSort(v: Boolean) {
+        autoSort.value = v
+        prefs.autoSort = v
     }
 
     fun testConnection() {
@@ -142,7 +149,25 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             }
             val finalSize = size
             val finalOpener = opener
-            val target = normFolder(folder.value)
+            val base = normFolder(folder.value)
+            var chosen = base
+            if (autoSort.value && job.name.endsWith(".epub", ignoreCase = true)) {
+                // Cartella "Cognome, Nome" ricavata dai metadati dell'EPUB; senza autore resta la cartella base.
+                val meta = try {
+                    withContext(Dispatchers.IO) { EpubMeta.read(finalOpener) }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    null
+                }
+                val authorDir = meta?.authorFolder
+                if (authorDir != null) {
+                    client.ensureDir(host.value, base, authorDir)
+                    chosen = join(base, authorDir)
+                }
+            }
+            val target = chosen
+            patch(job.id) { it.copy(dest = target) }
 
             var last = 0L
             val progress: (Long) -> Unit = { sent ->

@@ -82,6 +82,7 @@ fun SendScreen(vm: MainViewModel) {
     val host by vm.host.collectAsStateWithLifecycle()
     val folder by vm.folder.collectAsStateWithLifecycle()
     val fast by vm.fast.collectAsStateWithLifecycle()
+    val autoSort by vm.autoSort.collectAsStateWithLifecycle()
     val connection by vm.connection.collectAsStateWithLifecycle()
     val jobs by vm.jobs.collectAsStateWithLifecycle()
 
@@ -126,10 +127,22 @@ fun SendScreen(vm: MainViewModel) {
             OutlinedTextField(
                 value = folder,
                 onValueChange = vm::setFolder,
-                label = { Text("Cartella di destinazione sull'X4") },
+                label = { Text("Cartella base sull'X4") },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
+        }
+        item {
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.weight(1f)) {
+                    Text("Organizza per autore")
+                    Text(
+                        "Cartella \"Cognome, Nome\" letta dall'EPUB, creata se manca",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                Switch(checked = autoSort, onCheckedChange = vm::setAutoSort)
+            }
         }
         item {
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
@@ -184,7 +197,14 @@ private fun JobRow(job: UploadJob, onRetry: () -> Unit) {
                 val secs = job.millis / 1000.0
                 val speed = if (job.millis > 0) job.size / 1024.0 / secs else 0.0
                 Text(
-                    String.format(Locale.US, "Inviato - %s in %.1f s (%.0f KB/s)", fmtSize(job.size), secs, speed),
+                    String.format(
+                        Locale.US,
+                        "Inviato in %s - %s, %.1f s (%.0f KB/s)",
+                        job.dest ?: "/",
+                        fmtSize(job.size),
+                        secs,
+                        speed,
+                    ),
                     style = MaterialTheme.typography.bodySmall,
                 )
             }
