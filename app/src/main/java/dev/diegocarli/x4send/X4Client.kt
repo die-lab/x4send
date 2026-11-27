@@ -4,12 +4,19 @@ import android.content.Context
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.ConnectionPool
@@ -30,9 +37,14 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.IOException
 import java.io.InputStream
+import java.net.Inet4Address
 import java.net.InetAddress
+import java.net.InetSocketAddress
+import java.net.NetworkInterface
+import java.net.Socket
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
+import javax.net.SocketFactory
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
@@ -58,7 +70,14 @@ class X4Client(private val ctx: Context) {
         const val WS_CHUNK = 8 * 1024
         private const val WS_QUEUE_LIMIT = 128 * 1024
         private const val HTTP_CHUNK = 16 * 1024
+
+        /** Interfacce da non scandire: dati mobili, VPN, tunnel. */
+        private val SKIP_IF = listOf("rmnet", "ccmni", "tun", "ppp", "dummy", "clat", "v4-", "ipsec", "lo")
     }
+
+    /** Diventa true se Android rifiuta di legare i socket al WiFi (es. VPN): da li' in poi si usa la rete normale. */
+    @Volatile
+    private var bindBroken = false
 
     private fun clean(host: String): String =
         host.trim().removePrefix("http://").removePrefix("https://").trimEnd('/')
@@ -72,14 +91,43 @@ class X4Client(private val ctx: Context) {
         }
     }
 
-    private fun http(): OkHttpClient {
+    private fun boundNetwork(): Network? = if (bindBroken) null else wifi()
+
+    private fun isBindError(e: Throwable): Boolean {
+        var t: Throwable? = e
+        var depth = 0
+        while (t != null && depth < 8) {
+            val m = t.message.orEmpty()
+            if (m.contains("EPERM") || m.contains("Binding socket", ignoreCase = true)) return true
+            t = t.cause
+            depth++
+        }
+        return false
+    }
+
+    /**
+     * Esegue la richiesta legandola al WiFi (serve con l'hotspot dell'X4, che non ha internet).
+     * Se Android lo vieta (EPERM, tipico con una VPN attiva) riprova sulla rete predefinita.
+     */
+    private suspend fun <T> withNet(block: suspend (OkHttpClient) -> T): T {
+        val n = boundNetwork() ?: return block(http(null))
+        return try {
+            block(http(n))
+        } catch (e: IOException) {
+            if (!isBindError(e)) throw e
+            bindBroken = true
+            block(http(null))
+        }
+    }
+
+    private fun http(network: Network?): OkHttpClient {
         val b = OkHttpClient.Builder()
             .connectTimeout(8, TimeUnit.SECONDS)
             .readTimeout(60, TimeUnit.SECONDS)
             .writeTimeout(60, TimeUnit.SECONDS)
             .retryOnConnectionFailure(false)
             .connectionPool(ConnectionPool(0, 1, TimeUnit.SECONDS))
-        wifi()?.let { n ->
+        network?.let { n ->
             b.socketFactory(n.socketFactory)
             b.dns(object : Dns {
                 override fun lookup(hostname: String): List<InetAddress> =
@@ -108,17 +156,19 @@ class X4Client(private val ctx: Context) {
 
     suspend fun status(host: String): Status = withContext(Dispatchers.IO) {
         val req = Request.Builder().url("http://${clean(host)}/api/status").build()
-        http().newCall(req).await().use { r ->
-            if (!r.isSuccessful) throw IOException("HTTP ${r.code}")
-            val j = JSONObject(r.body?.string().orEmpty())
-            Status(
-                version = j.optString("version", "?"),
-                ip = j.optString("ip", "?"),
-                mode = j.optString("mode", "?"),
-                rssi = j.optInt("rssi"),
-                freeHeap = j.optLong("freeHeap"),
-                uptime = j.optLong("uptime"),
-            )
+        withNet { c ->
+            c.newCall(req).await().use { r ->
+                if (!r.isSuccessful) throw IOException("HTTP ${r.code}")
+                val j = JSONObject(r.body?.string().orEmpty())
+                Status(
+                    version = j.optString("version", "?"),
+                    ip = j.optString("ip", "?"),
+                    mode = j.optString("mode", "?"),
+                    rssi = j.optInt("rssi"),
+                    freeHeap = j.optLong("freeHeap"),
+                    uptime = j.optLong("uptime"),
+                )
+            }
         }
     }
 
@@ -126,13 +176,15 @@ class X4Client(private val ctx: Context) {
         val url = "http://${clean(host)}/api/files".toHttpUrl().newBuilder()
             .addQueryParameter("path", path)
             .build()
-        http().newCall(Request.Builder().url(url).build()).await().use { r ->
-            val text = r.body?.string().orEmpty()
-            if (!r.isSuccessful) throw IOException(text.ifBlank { "HTTP ${r.code}" })
-            val arr = JSONArray(text)
-            List(arr.length()) { i ->
-                val o = arr.getJSONObject(i)
-                RemoteFile(o.getString("name"), o.optLong("size"), o.optBoolean("isDirectory"))
+        withNet { c ->
+            c.newCall(Request.Builder().url(url).build()).await().use { r ->
+                val text = r.body?.string().orEmpty()
+                if (!r.isSuccessful) throw IOException(text.ifBlank { "HTTP ${r.code}" })
+                val arr = JSONArray(text)
+                List(arr.length()) { i ->
+                    val o = arr.getJSONObject(i)
+                    RemoteFile(o.getString("name"), o.optLong("size"), o.optBoolean("isDirectory"))
+                }
             }
         }
     }
@@ -142,10 +194,12 @@ class X4Client(private val ctx: Context) {
             val fb = FormBody.Builder()
             fields.forEach { fb.add(it.first, it.second) }
             val req = Request.Builder().url("http://${clean(host)}/$endpoint").post(fb.build()).build()
-            http().newCall(req).await().use { r ->
-                val text = r.body?.string().orEmpty()
-                if (!r.isSuccessful) throw IOException(text.ifBlank { "HTTP ${r.code}" })
-                text
+            withNet { c ->
+                c.newCall(req).await().use { r ->
+                    val text = r.body?.string().orEmpty()
+                    if (!r.isSuccessful) throw IOException(text.ifBlank { "HTTP ${r.code}" })
+                    text
+                }
             }
         }
 
@@ -200,10 +254,12 @@ class X4Client(private val ctx: Context) {
             .addQueryParameter("path", folder)
             .build()
         val req = Request.Builder().url(url).post(multipart).build()
-        http().newCall(req).await().use { r ->
-            val text = r.body?.string().orEmpty()
-            if (!r.isSuccessful) throw IOException(text.ifBlank { "HTTP ${r.code}" })
-            Unit
+        withNet { c ->
+            c.newCall(req).await().use { r ->
+                val text = r.body?.string().orEmpty()
+                if (!r.isSuccessful) throw IOException(text.ifBlank { "HTTP ${r.code}" })
+                Unit
+            }
         }
     }
 
@@ -219,6 +275,18 @@ class X4Client(private val ctx: Context) {
         open: () -> InputStream,
         onProgress: (Long) -> Unit,
     ) = withContext(Dispatchers.IO) {
+        withNet { c -> uploadWsWith(c, host, folder, name, size, open, onProgress) }
+    }
+
+    private suspend fun uploadWsWith(
+        client: OkHttpClient,
+        host: String,
+        folder: String,
+        name: String,
+        size: Long,
+        open: () -> InputStream,
+        onProgress: (Long) -> Unit,
+    ) {
         val ready = CompletableDeferred<Unit>()
         val done = CompletableDeferred<Unit>()
         val failure = AtomicReference<Throwable?>(null)
@@ -248,7 +316,7 @@ class X4Client(private val ctx: Context) {
         }
 
         val request = Request.Builder().url("http://${clean(host)}:81/").build()
-        val ws = http().newWebSocket(request, listener)
+        val ws = client.newWebSocket(request, listener)
         try {
             ws.send("START:$name:$size:$folder")
             withTimeout(10_000) { ready.await() }
@@ -275,5 +343,75 @@ class X4Client(private val ctx: Context) {
         } finally {
             ws.close(1000, null)
         }
+    }
+
+    // ---------------------------------------------------------------- ricerca dell'X4
+
+    /**
+     * Cerca l'X4: prima crosspoint.local, poi scandisce le reti locali del telefono
+     * (WiFi a cui e' collegato o hotspot che sta condividendo) sulla porta 80.
+     */
+    suspend fun discover(): Pair<String, Status>? = withContext(Dispatchers.IO) {
+        tryStatus("crosspoint.local")?.let { return@withContext "crosspoint.local" to it }
+        val candidates = localSubnets()
+            .flatMap { (prefix, own) -> (1..254).map { "$prefix.$it" }.filter { it != own } }
+            .distinct()
+        if (candidates.isEmpty()) return@withContext null
+        val sem = Semaphore(48)
+        val open = coroutineScope {
+            candidates.map { ip -> async { sem.withPermit { if (portOpen(ip)) ip else null } } }.awaitAll().filterNotNull()
+        }
+        for (ip in open) {
+            tryStatus(ip)?.let { return@withContext ip to it }
+        }
+        null
+    }
+
+    private suspend fun tryStatus(host: String): Status? = withTimeoutOrNull(4_000) {
+        try {
+            status(host)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    private fun portOpen(ip: String): Boolean {
+        val bound = boundNetwork()?.socketFactory
+        return try {
+            connect(bound ?: SocketFactory.getDefault(), ip)
+            true
+        } catch (e: IOException) {
+            if (bound != null && isBindError(e)) {
+                bindBroken = true
+                try {
+                    connect(SocketFactory.getDefault(), ip)
+                    true
+                } catch (_: IOException) {
+                    false
+                }
+            } else {
+                false
+            }
+        }
+    }
+
+    private fun connect(factory: SocketFactory, ip: String) {
+        val s: Socket = factory.createSocket()
+        s.use { it.connect(InetSocketAddress(ip, 80), 400) }
+    }
+
+    /** Coppie (prefisso /24, IP del telefono) per le interfacce locali utili. */
+    private fun localSubnets(): List<Pair<String, String>> = try {
+        NetworkInterface.getNetworkInterfaces()?.toList().orEmpty()
+            .filter { ni -> ni.isUp && !ni.isLoopback && SKIP_IF.none { ni.name.startsWith(it) } }
+            .flatMap { it.inetAddresses.toList() }
+            .filterIsInstance<Inet4Address>()
+            .filter { it.isSiteLocalAddress }
+            .mapNotNull { a -> a.hostAddress?.let { ip -> ip.substringBeforeLast('.') to ip } }
+            .distinctBy { it.first }
+    } catch (_: Exception) {
+        emptyList()
     }
 }

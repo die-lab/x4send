@@ -3,6 +3,7 @@ package dev.diegocarli.x4send
 import android.app.Application
 import android.net.Uri
 import android.provider.OpenableColumns
+import android.webkit.MimeTypeMap
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.CancellationException
@@ -20,7 +21,7 @@ import java.net.NoRouteToHostException
 import java.net.SocketTimeoutException
 import java.net.UnknownHostException
 
-enum class JobState { Queued, Uploading, Done, Failed }
+enum class JobState { Queued, Converting, Uploading, Done, Failed }
 
 data class UploadJob(
     val id: Long,
@@ -32,6 +33,8 @@ data class UploadJob(
     val error: String? = null,
     val millis: Long = 0,
     val dest: String? = null,
+    /** Es. "DOCX → EPUB" se il file e' stato convertito prima dell'invio. */
+    val converted: String? = null,
 )
 
 class MainViewModel(app: Application) : AndroidViewModel(app) {
@@ -45,6 +48,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val fast = MutableStateFlow(prefs.fast)
     val autoSort = MutableStateFlow(prefs.autoSort)
     val connection = MutableStateFlow("Non verificata")
+    val showGuide = MutableStateFlow(!prefs.guideSeen)
     val jobs = MutableStateFlow<List<UploadJob>>(emptyList())
 
     val libPath = MutableStateFlow("/")
@@ -73,6 +77,35 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun setAutoSort(v: Boolean) {
         autoSort.value = v
         prefs.autoSort = v
+    }
+
+    fun openGuide() {
+        showGuide.value = true
+    }
+
+    fun closeGuide() {
+        showGuide.value = false
+        prefs.guideSeen = true
+    }
+
+    /** Cerca l'X4 sulla rete (utile con l'hotspot del telefono, dove l'IP cambia). */
+    fun discover() {
+        viewModelScope.launch {
+            connection.value = "Ricerca dell'X4 sulla rete..."
+            val found = try {
+                client.discover()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                null
+            }
+            connection.value = if (found != null) {
+                setHost(found.first)
+                "Trovato: ${found.first} - firmware ${found.second.version} - ${found.second.mode}"
+            } else {
+                "X4 non trovato: sull'X4 e' aperto File Transfer? Altrimenti scrivi l'IP che mostra"
+            }
+        }
     }
 
     fun testConnection() {
@@ -110,7 +143,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun clearFinished() {
-        jobs.update { list -> list.filter { it.state == JobState.Queued || it.state == JobState.Uploading } }
+        jobs.update { list ->
+            list.filter { it.state == JobState.Queued || it.state == JobState.Converting || it.state == JobState.Uploading }
+        }
     }
 
     private fun pump() {
@@ -128,13 +163,27 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private suspend fun runJob(job: UploadJob) {
-        patch(job.id) { it.copy(state = JobState.Uploading, sent = 0, error = null) }
+        patch(job.id) { it.copy(state = JobState.Uploading, sent = 0, error = null, converted = null) }
         var temp: File? = null
         val started = System.currentTimeMillis()
         try {
             var size = job.size
+            var sendName = job.name
             var opener: () -> InputStream = {
                 ctx.contentResolver.openInputStream(job.uri) ?: throw IOException("File non leggibile")
+            }
+            if (!Formats.isNative(job.name)) {
+                // L'X4 legge solo EPUB, TXT, XTC e BMP: il resto viene convertito sul telefono.
+                if (!Formats.isConvertible(job.name)) throw IOException(Formats.unsupported(job.name))
+                patch(job.id) { it.copy(state = JobState.Converting) }
+                val source = opener
+                val conv = withContext(Dispatchers.IO) { Converter.convert(ctx, job.name, source, ctx.cacheDir) }
+                temp = conv.file
+                sendName = conv.name
+                size = conv.file.length()
+                opener = { conv.file.inputStream() }
+                val label = "${Formats.ext(job.name).uppercase()} → ${Formats.ext(conv.name).uppercase()}"
+                patch(job.id) { it.copy(state = JobState.Uploading, converted = label) }
             }
             if (size <= 0) {
                 // Dimensione sconosciuta: serve per Content-Length / START, quindi copia in cache.
@@ -151,7 +200,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             val finalOpener = opener
             val base = normFolder(folder.value)
             var chosen = base
-            if (autoSort.value && job.name.endsWith(".epub", ignoreCase = true)) {
+            if (autoSort.value && sendName.endsWith(".epub", ignoreCase = true)) {
                 // Cartella "Cognome, Nome" ricavata dai metadati dell'EPUB; senza autore resta la cartella base.
                 val meta = try {
                     withContext(Dispatchers.IO) { EpubMeta.read(finalOpener) }
@@ -179,22 +228,24 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
             if (fast.value) {
                 try {
-                    client.uploadWs(host.value, target, job.name, finalSize, finalOpener, progress)
+                    client.uploadWs(host.value, target, sendName, finalSize, finalOpener, progress)
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
                     // Il WebSocket non ha funzionato: ripiega sull'upload HTTP classico.
                     last = 0
-                    client.uploadHttp(host.value, target, job.name, finalSize, finalOpener, progress)
+                    client.uploadHttp(host.value, target, sendName, finalSize, finalOpener, progress)
                 }
             } else {
-                client.uploadHttp(host.value, target, job.name, finalSize, finalOpener, progress)
+                client.uploadHttp(host.value, target, sendName, finalSize, finalOpener, progress)
             }
             val elapsed = System.currentTimeMillis() - started
             patch(job.id) { it.copy(state = JobState.Done, sent = finalSize, size = finalSize, millis = elapsed) }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
+            patch(job.id) { it.copy(state = JobState.Failed, error = describe(e)) }
+        } catch (e: OutOfMemoryError) {
             patch(job.id) { it.copy(state = JobState.Failed, error = describe(e)) }
         } finally {
             temp?.delete()
@@ -218,7 +269,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         var n = name ?: uri.lastPathSegment ?: "libro.epub"
         // ':' e' il separatore del protocollo WebSocket, '/' e '\' non sono ammessi nei nomi.
         n = n.replace(Regex("[:/\\\\]"), "-")
-        if (!n.contains('.') && ctx.contentResolver.getType(uri) == "application/epub+zip") n += ".epub"
+        if (!n.contains('.')) {
+            // Nome senza estensione (succede con alcune condivisioni): la ricava dal tipo MIME.
+            val mime = ctx.contentResolver.getType(uri)
+            val ext = if (mime == "application/epub+zip") "epub" else mime?.let { MimeTypeMap.getSingleton().getExtensionFromMimeType(it) }
+            if (ext != null) n += ".$ext"
+        }
         return n to size
     }
 
@@ -296,6 +352,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         is SocketTimeoutException -> "timeout: l'X4 e' in modalita' File Transfer e sullo stesso WiFi?"
         is ConnectException, is NoRouteToHostException -> "X4 non raggiungibile: controlla WiFi e modalita' File Transfer"
         is SecurityException -> "permesso di lettura scaduto: riseleziona il file"
+        is OutOfMemoryError -> "file troppo grande da convertire sul telefono"
         else -> e.message ?: e.javaClass.simpleName
     }
 }

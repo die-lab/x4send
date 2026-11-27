@@ -12,8 +12,8 @@ android {
         applicationId = "dev.diegocarli.x4send"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.2.0"
     }
 
     signingConfigs {
@@ -54,4 +54,8 @@ dependencies {
     implementation("androidx.core:core-ktx:1.15.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
+    // Conversione documenti -> EPUB
+    implementation("org.jsoup:jsoup:1.17.2")
+    implementation("org.commonmark:commonmark:0.22.0")
+    implementation("com.tom-roush:pdfbox-android:2.0.27.0")
 }

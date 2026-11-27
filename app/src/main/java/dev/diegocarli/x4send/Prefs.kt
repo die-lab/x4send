@@ -20,4 +20,8 @@ class Prefs(ctx: Context) {
     var fast: Boolean
         get() = sp.getBoolean("fast", false)
         set(v) = sp.edit().putBoolean("fast", v).apply()
+
+    var guideSeen: Boolean
+        get() = sp.getBoolean("guideSeen", false)
+        set(v) = sp.edit().putBoolean("guideSeen", v).apply()
 }

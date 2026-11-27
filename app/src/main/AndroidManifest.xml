@@ -21,18 +21,32 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
 
-            <!-- Condivisione di uno o piu' EPUB da Files, Chrome, Gmail, ecc. -->
+            <!-- Condivisione di libri e documenti da Files, Chrome, Gmail, ecc. (convertiti se serve) -->
             <intent-filter>
                 <action android:name="android.intent.action.SEND" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="application/epub+zip" />
                 <data android:mimeType="application/octet-stream" />
+                <data android:mimeType="application/pdf" />
+                <data android:mimeType="application/vnd.openxmlformats-officedocument.wordprocessingml.document" />
+                <data android:mimeType="application/vnd.oasis.opendocument.text" />
+                <data android:mimeType="application/rtf" />
+                <data android:mimeType="application/x-fictionbook+xml" />
+                <data android:mimeType="text/*" />
+                <data android:mimeType="image/*" />
             </intent-filter>
             <intent-filter>
                 <action android:name="android.intent.action.SEND_MULTIPLE" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="application/epub+zip" />
                 <data android:mimeType="application/octet-stream" />
+                <data android:mimeType="application/pdf" />
+                <data android:mimeType="application/vnd.openxmlformats-officedocument.wordprocessingml.document" />
+                <data android:mimeType="application/vnd.oasis.opendocument.text" />
+                <data android:mimeType="application/rtf" />
+                <data android:mimeType="application/x-fictionbook+xml" />
+                <data android:mimeType="text/*" />
+                <data android:mimeType="image/*" />
             </intent-filter>
         </activity>
     </application>
