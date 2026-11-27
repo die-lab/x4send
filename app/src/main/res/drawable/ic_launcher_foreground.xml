@@ -1,37 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Lettore e-ink con freccia di invio. Resta nella zona sicura (cerchio di 66dp al centro). -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <!-- tempio greco, ridotto per stare nella zona sicura -->
-    <group android:pivotX="54" android:pivotY="56" android:scaleX="0.76" android:scaleY="0.76">
-        <path android:fillColor="#F4F6FA" android:pathData="M28.00,44.00 L54.00,30.00 L80.00,44.00 Z" />
-        <path android:fillColor="#D3D9E4" android:pathData="M33.00,42.60 L54.00,33.20 L75.00,42.60 Z" />
-        <path android:fillColor="#FFFFFF" android:pathData="M27.00,44.00 L81.00,44.00 L81.00,47.00 L27.00,47.00 Z" />
-        <path android:fillColor="#E1E6EE" android:pathData="M29.00,47.00 L79.00,47.00 L79.00,51.00 L29.00,51.00 Z" />
-        <path android:fillColor="#7E899E" android:pathData="M31.00,51.00 L77.00,51.00 L77.00,72.00 L31.00,72.00 Z" />
-        <path android:fillColor="#465066" android:pathData="M50.00,58.00 L58.00,58.00 L58.00,72.00 L50.00,72.00 Z" />
-        <path android:fillColor="#FFFFFF" android:pathData="M31.00,52.50 L35.00,52.50 L35.00,72.00 L31.00,72.00 Z" />
-        <path android:fillColor="#C5CCD9" android:pathData="M33.70,52.50 L35.00,52.50 L35.00,72.00 L33.70,72.00 Z" />
-        <path android:fillColor="#FFFFFF" android:pathData="M30.40,51.00 L35.60,51.00 L35.60,52.50 L30.40,52.50 Z" />
-        <path android:fillColor="#FFFFFF" android:pathData="M39.40,52.50 L43.40,52.50 L43.40,72.00 L39.40,72.00 Z" />
-        <path android:fillColor="#C5CCD9" android:pathData="M42.10,52.50 L43.40,52.50 L43.40,72.00 L42.10,72.00 Z" />
-        <path android:fillColor="#FFFFFF" android:pathData="M38.80,51.00 L44.00,51.00 L44.00,52.50 L38.80,52.50 Z" />
-        <path android:fillColor="#FFFFFF" android:pathData="M47.80,52.50 L51.80,52.50 L51.80,72.00 L47.80,72.00 Z" />
-        <path android:fillColor="#C5CCD9" android:pathData="M50.50,52.50 L51.80,52.50 L51.80,72.00 L50.50,72.00 Z" />
-        <path android:fillColor="#FFFFFF" android:pathData="M47.20,51.00 L52.40,51.00 L52.40,52.50 L47.20,52.50 Z" />
-        <path android:fillColor="#FFFFFF" android:pathData="M56.20,52.50 L60.20,52.50 L60.20,72.00 L56.20,72.00 Z" />
-        <path android:fillColor="#C5CCD9" android:pathData="M58.90,52.50 L60.20,52.50 L60.20,72.00 L58.90,72.00 Z" />
-        <path android:fillColor="#FFFFFF" android:pathData="M55.60,51.00 L60.80,51.00 L60.80,52.50 L55.60,52.50 Z" />
-        <path android:fillColor="#FFFFFF" android:pathData="M64.60,52.50 L68.60,52.50 L68.60,72.00 L64.60,72.00 Z" />
-        <path android:fillColor="#C5CCD9" android:pathData="M67.30,52.50 L68.60,52.50 L68.60,72.00 L67.30,72.00 Z" />
-        <path android:fillColor="#FFFFFF" android:pathData="M64.00,51.00 L69.20,51.00 L69.20,52.50 L64.00,52.50 Z" />
-        <path android:fillColor="#FFFFFF" android:pathData="M73.00,52.50 L77.00,52.50 L77.00,72.00 L73.00,72.00 Z" />
-        <path android:fillColor="#C5CCD9" android:pathData="M75.70,52.50 L77.00,52.50 L77.00,72.00 L75.70,72.00 Z" />
-        <path android:fillColor="#FFFFFF" android:pathData="M72.40,51.00 L77.60,51.00 L77.60,52.50 L72.40,52.50 Z" />
-        <path android:fillColor="#EEF1F6" android:pathData="M28.00,72.00 L80.00,72.00 L80.00,75.00 L28.00,75.00 Z" />
-        <path android:fillColor="#D6DCE6" android:pathData="M25.00,75.00 L83.00,75.00 L83.00,78.00 L25.00,78.00 Z" />
-        <path android:fillColor="#C0C8D6" android:pathData="M22.00,78.00 L86.00,78.00 L86.00,81.00 L22.00,81.00 Z" />
-    </group>
+    <!-- corpo del lettore -->
+    <path android:fillColor="#CFC6E0" android:pathData="M38,25h22a5,5 0,0 1,5 5v44a5,5 0,0 1,-5 5h-22a5,5 0,0 1,-5 -5v-44a5,5 0,0 1,5 -5z" />
+    <!-- schermo -->
+    <path android:fillColor="#FAF8F3" android:pathData="M37,29h24v40h-24z" />
+    <!-- titolo e righe di testo -->
+    <path android:fillColor="#4A3F63" android:pathData="M40,33h12v3h-12z" />
+    <path android:fillColor="#A59DB5" android:pathData="M40,40h18v2h-18z M40,45h18v2h-18z M40,50h18v2h-18z M40,55h11v2h-11z" />
+    <path android:fillColor="#8E84A6" android:pathData="M45,72.5h8v2h-8z" />
+    <!-- distacco, cerchio e freccia di invio -->
+    <path android:fillColor="#2B1F4D" android:pathData="M48.5,67a15.5,15.5 0,1 0,31 0a15.5,15.5 0,1 0,-31 0z" />
+    <path android:fillColor="#D0BCFF" android:pathData="M51,67a13,13 0,1 0,26 0a13,13 0,1 0,-26 0z" />
+    <path android:fillColor="#2B1F4D" android:pathData="M64,58L71.5,65.5L67.5,65.5L67.5,75L60.5,75L60.5,65.5L56.5,65.5Z" />
 </vector>
