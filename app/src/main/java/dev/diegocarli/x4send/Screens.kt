@@ -3,13 +3,16 @@ package dev.diegocarli.x4send
 import android.content.Intent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
@@ -281,16 +284,33 @@ private fun JobRow(job: UploadJob, onRetry: () -> Unit) {
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun LibraryScreen(vm: MainViewModel) {
+    val ctx = LocalContext.current
     val path by vm.libPath.collectAsStateWithLifecycle()
     val entries by vm.libItems.collectAsStateWithLifecycle()
     val busy by vm.libBusy.collectAsStateWithLifecycle()
     val error by vm.libError.collectAsStateWithLifecycle()
+    val jobs by vm.jobs.collectAsStateWithLifecycle()
+    val moveItem by vm.moveItem.collectAsStateWithLifecycle()
 
+    var actionsFor by remember { mutableStateOf<RemoteFile?>(null) }
     var toDelete by remember { mutableStateOf<RemoteFile?>(null) }
+    var toRename by remember { mutableStateOf<RemoteFile?>(null) }
+    var renameText by remember { mutableStateOf("") }
     var showMkdir by remember { mutableStateOf(false) }
     var newName by remember { mutableStateOf("") }
+
+    val uploadHere = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        uris.forEach {
+            try {
+                ctx.contentResolver.takePersistableUriPermission(it, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            } catch (_: Exception) {
+            }
+        }
+        if (uris.isNotEmpty()) vm.enqueue(uris, folder = path)
+    }
 
     Column(Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 16.dp)) {
         Text("Libreria sull'X4", style = MaterialTheme.typography.headlineSmall, modifier = Modifier.padding(top = 12.dp))
@@ -300,29 +320,115 @@ fun LibraryScreen(vm: MainViewModel) {
             OutlinedButton(onClick = vm::refreshLib) { Text("Aggiorna") }
             OutlinedButton(onClick = { showMkdir = true }) { Text("Nuova cartella") }
         }
+        Button(
+            onClick = { uploadHere.launch(arrayOf("*/*")) },
+            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+        ) { Text("Carica qui") }
+
+        val active = jobs.count { it.state == JobState.Queued || it.state == JobState.Converting || it.state == JobState.Uploading }
+        if (active > 0) {
+            Text(
+                "Invio in corso: $active file (dettagli nella scheda Invia)",
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.padding(top = 6.dp),
+            )
+        }
         if (busy) LinearProgressIndicator(modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
         error?.let {
             Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 8.dp))
         }
-        LazyColumn(Modifier.fillMaxSize().padding(top = 8.dp)) {
+        Text(
+            "Tocca una cartella per aprirla. Tieni premuto (o ⋮) per rinominare, spostare o eliminare.",
+            style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier.padding(top = 6.dp),
+        )
+        LazyColumn(Modifier.fillMaxSize().padding(top = 4.dp)) {
             items(entries, key = { it.name }) { f ->
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable(enabled = f.isDir) { vm.openDir(f.name) }
+                        .combinedClickable(
+                            onClick = { if (f.isDir) vm.openDir(f.name) else actionsFor = f },
+                            onLongClick = { actionsFor = f },
+                        )
                         .padding(vertical = 8.dp),
                 ) {
                     Column(Modifier.weight(1f)) {
                         Text(if (f.isDir) "[cartella] ${f.name}" else f.name)
                         if (!f.isDir) Text(fmtSize(f.size), style = MaterialTheme.typography.bodySmall)
                     }
-                    TextButton(onClick = { toDelete = f }) { Text("Elimina") }
+                    TextButton(onClick = { actionsFor = f }) { Text("⋮") }
                 }
                 HorizontalDivider()
             }
         }
     }
+
+    actionsFor?.let { f ->
+        AlertDialog(
+            onDismissRequest = { actionsFor = null },
+            title = { Text(f.name) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    if (f.isDir) {
+                        TextButton(onClick = {
+                            actionsFor = null
+                            vm.openDir(f.name)
+                        }) { Text("Apri") }
+                    } else {
+                        TextButton(onClick = {
+                            actionsFor = null
+                            renameText = f.name
+                            toRename = f
+                        }) { Text("Rinomina") }
+                        TextButton(onClick = {
+                            actionsFor = null
+                            vm.startMove(f)
+                        }) { Text("Sposta in un'altra cartella") }
+                    }
+                    TextButton(onClick = {
+                        actionsFor = null
+                        toDelete = f
+                    }) { Text(if (f.isDir) "Elimina (solo se vuota)" else "Elimina") }
+                    if (f.isDir) {
+                        Text(
+                            "Il firmware CrossPoint non permette di rinominare o spostare le cartelle.",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { actionsFor = null }) { Text("Chiudi") } },
+        )
+    }
+
+    toRename?.let { f ->
+        AlertDialog(
+            onDismissRequest = { toRename = null },
+            title = { Text("Rinomina") },
+            text = {
+                OutlinedTextField(
+                    value = renameText,
+                    onValueChange = { renameText = it },
+                    singleLine = true,
+                    label = { Text("Nuovo nome") },
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = renameText.isNotBlank() && renameText.trim() != f.name,
+                    onClick = {
+                        vm.renameRemote(f, renameText)
+                        toRename = null
+                    },
+                ) { Text("Rinomina") }
+            },
+            dismissButton = { TextButton(onClick = { toRename = null }) { Text("Annulla") } },
+        )
+    }
+
+    moveItem?.let { f -> MoveDialog(vm, f) }
 
     toDelete?.let { f ->
         AlertDialog(
@@ -364,4 +470,38 @@ fun LibraryScreen(vm: MainViewModel) {
             dismissButton = { TextButton(onClick = { showMkdir = false }) { Text("Annulla") } },
         )
     }
+}
+
+/** Selettore della cartella di destinazione: si naviga tra le cartelle e si conferma "Sposta qui". */
+@Composable
+private fun MoveDialog(vm: MainViewModel, f: RemoteFile) {
+    val path by vm.movePath.collectAsStateWithLifecycle()
+    val dirs by vm.moveDirs.collectAsStateWithLifecycle()
+    val busy by vm.moveBusy.collectAsStateWithLifecycle()
+    AlertDialog(
+        onDismissRequest = vm::cancelMove,
+        title = { Text("Sposta \"${f.name}\"") },
+        text = {
+            Column {
+                Text("Destinazione: $path", style = MaterialTheme.typography.bodyMedium)
+                OutlinedButton(onClick = vm::moveUp, enabled = path != "/", modifier = Modifier.padding(vertical = 6.dp)) { Text("Su") }
+                if (busy) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                if (!busy && dirs.isEmpty()) Text("Nessuna sottocartella", style = MaterialTheme.typography.bodySmall)
+                LazyColumn(Modifier.fillMaxWidth().heightIn(max = 320.dp)) {
+                    items(dirs, key = { it }) { d ->
+                        Text(
+                            "[cartella] $d",
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { vm.moveOpen(d) }
+                                .padding(vertical = 10.dp),
+                        )
+                        HorizontalDivider()
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = vm::confirmMove, enabled = !busy) { Text("Sposta qui") } },
+        dismissButton = { TextButton(onClick = vm::cancelMove) { Text("Annulla") } },
+    )
 }

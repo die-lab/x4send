@@ -35,6 +35,8 @@ data class UploadJob(
     val dest: String? = null,
     /** Es. "DOCX → EPUB" se il file e' stato convertito prima dell'invio. */
     val converted: String? = null,
+    /** Cartella scelta dalla Libreria ("Carica qui"): vince su cartella base e ordinamento per autore. */
+    val folder: String? = null,
 )
 
 class MainViewModel(app: Application) : AndroidViewModel(app) {
@@ -55,6 +57,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val libItems = MutableStateFlow<List<RemoteFile>>(emptyList())
     val libBusy = MutableStateFlow(false)
     val libError = MutableStateFlow<String?>(null)
+
+    /** Selettore della cartella di destinazione per "Sposta". */
+    val moveItem = MutableStateFlow<RemoteFile?>(null)
+    private var moveFrom = "/"
+    val movePath = MutableStateFlow("/")
+    val moveDirs = MutableStateFlow<List<String>>(emptyList())
+    val moveBusy = MutableStateFlow(false)
 
     private var nextId = 1L
     private var worker: Job? = null
@@ -127,10 +136,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     // ---------------------------------------------------------------- coda di upload
 
-    fun enqueue(uris: List<Uri>) {
+    fun enqueue(uris: List<Uri>, folder: String? = null) {
         val added = uris.map { uri ->
             val (name, size) = describeUri(uri)
-            UploadJob(nextId++, uri, name, size)
+            UploadJob(nextId++, uri, name, size, folder = folder)
         }
         if (added.isEmpty()) return
         jobs.update { it + added }
@@ -198,9 +207,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             }
             val finalSize = size
             val finalOpener = opener
-            val base = normFolder(folder.value)
+            val base = job.folder ?: normFolder(folder.value)
             var chosen = base
-            if (autoSort.value && sendName.endsWith(".epub", ignoreCase = true)) {
+            if (job.folder == null && autoSort.value && sendName.endsWith(".epub", ignoreCase = true)) {
                 // Cartella "Cognome, Nome" ricavata dai metadati dell'EPUB; senza autore resta la cartella base.
                 val meta = try {
                     withContext(Dispatchers.IO) { EpubMeta.read(finalOpener) }
@@ -241,6 +250,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             }
             val elapsed = System.currentTimeMillis() - started
             patch(job.id) { it.copy(state = JobState.Done, sent = finalSize, size = finalSize, millis = elapsed) }
+            if (job.folder != null && job.folder == libPath.value) refreshLib()
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -323,6 +333,73 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    fun renameRemote(f: RemoteFile, newName: String) {
+        val name = newName.trim().replace(Regex("[/\\\\]"), "-")
+        if (name.isEmpty() || name == f.name) return
+        viewModelScope.launch {
+            try {
+                client.rename(host.value, join(libPath.value, f.name), name)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                libError.value = describe(e)
+            }
+            refreshLib()
+        }
+    }
+
+    fun startMove(f: RemoteFile) {
+        moveFrom = libPath.value
+        moveItem.value = f
+        loadMoveDirs(libPath.value)
+    }
+
+    fun cancelMove() {
+        moveItem.value = null
+    }
+
+    fun moveOpen(name: String) = loadMoveDirs(join(movePath.value, name))
+
+    fun moveUp() {
+        val p = movePath.value
+        if (p != "/") loadMoveDirs(p.substringBeforeLast('/').ifEmpty { "/" })
+    }
+
+    private fun loadMoveDirs(path: String) {
+        movePath.value = path
+        viewModelScope.launch {
+            moveBusy.value = true
+            try {
+                moveDirs.value = client.list(host.value, path).filter { it.isDir }.map { it.name }.sortedBy { it.lowercase() }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                moveDirs.value = emptyList()
+                libError.value = describe(e)
+            } finally {
+                moveBusy.value = false
+            }
+        }
+    }
+
+    /** Sposta il file scelto nella cartella aperta nel selettore. */
+    fun confirmMove() {
+        val f = moveItem.value ?: return
+        val dest = movePath.value
+        moveItem.value = null
+        if (dest == moveFrom) return
+        viewModelScope.launch {
+            try {
+                client.move(host.value, join(moveFrom, f.name), dest)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                libError.value = describe(e)
+            }
+            refreshLib()
+        }
+    }
+
     fun makeDir(name: String) {
         viewModelScope.launch {
             try {
@@ -353,6 +430,20 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         is ConnectException, is NoRouteToHostException -> "X4 non raggiungibile: controlla WiFi e modalita' File Transfer"
         is SecurityException -> "permesso di lettura scaduto: riseleziona il file"
         is OutOfMemoryError -> "file troppo grande da convertire sul telefono"
-        else -> e.message ?: e.javaClass.simpleName
+        else -> translate(e.message ?: e.javaClass.simpleName)
+    }
+
+    /** Messaggi del web server CrossPoint resi in italiano. */
+    private fun translate(m: String): String = when {
+        m.contains("Target already exists") -> "esiste gia' un file con questo nome"
+        m.contains("Folder already exists") -> "la cartella esiste gia'"
+        m.contains("Only files can be renamed") -> "il firmware puo' rinominare solo i file, non le cartelle"
+        m.contains("Only files can be moved") -> "il firmware puo' spostare solo i file, non le cartelle"
+        m.contains("folder not empty") -> "la cartella non e' vuota: svuotala prima di eliminarla"
+        m.contains("protected", ignoreCase = true) -> "elemento protetto dal firmware"
+        m.contains("Destination not found") -> "cartella di destinazione non trovata"
+        m.contains("Item not found") || m.contains("not found)") -> "file non trovato: aggiorna la libreria"
+        m == "HTTP 404" || m.contains("Not found", ignoreCase = true) -> "funzione non disponibile: aggiorna il firmware CrossPoint"
+        else -> m
     }
 }

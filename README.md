@@ -9,7 +9,7 @@ App Android (Kotlin + Jetpack Compose) per inviare libri e documenti direttament
 - Guida al collegamento dentro l'app (pulsante *Come collegarsi*, mostrata al primo avvio).
 - Selettore file multiplo, coda con progresso, velocita' media (KB/s) a fine invio.
 - Due metodi di upload, selezionabili: HTTP multipart (`POST /upload`) e WebSocket veloce (porta 81), con ripiego automatico su HTTP.
-- Libreria: sfoglia, crea cartelle, elimina file sull'X4.
+- Libreria: sfoglia, crea cartelle, *Carica qui* nella cartella aperta; tieni premuto un file per rinominarlo, spostarlo (selettore della cartella) o eliminarlo. Il firmware non rinomina ne' sposta le cartelle ed elimina solo cartelle vuote.
 - Usa la rete WiFi anche se non ha internet (hotspot dell'X4) e prova a risolvere `crosspoint.local`.
 
 ## Uso
@@ -35,6 +35,8 @@ App Android (Kotlin + Jetpack Compose) per inviare libri e documenti direttament
 | Upload HTTP | `POST /upload?path=/Cartella`, campo multipart `file` |
 | Nuova cartella | `POST /mkdir` (`name`, `path`) |
 | Elimina | `POST /delete` (`path`, `type=file\|folder`) |
+| Rinomina file | `POST /rename` (`path`, `name`) |
+| Sposta file | `POST /move` (`path`, `dest`) |
 | Upload WS | `ws://host:81/` → `START:<nome>:<byte>:<cartella>` → `READY` → frame binari → `DONE` |
 
 I frame WebSocket sono da 8 KB: il server ESP32 accetta payload di ~15 KB al massimo.

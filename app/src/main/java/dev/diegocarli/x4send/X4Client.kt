@@ -216,6 +216,16 @@ class X4Client(private val ctx: Context) {
         }
     }
 
+    /** Rinomina un file (il firmware non rinomina le cartelle). */
+    suspend fun rename(host: String, path: String, newName: String) {
+        postForm(host, "rename", "path" to path, "name" to newName)
+    }
+
+    /** Sposta un file in una cartella esistente (il firmware non sposta le cartelle). */
+    suspend fun move(host: String, path: String, destFolder: String) {
+        postForm(host, "move", "path" to path, "dest" to destFolder)
+    }
+
     suspend fun delete(host: String, path: String, isDir: Boolean) {
         postForm(host, "delete", "path" to path, "type" to if (isDir) "folder" else "file")
     }
