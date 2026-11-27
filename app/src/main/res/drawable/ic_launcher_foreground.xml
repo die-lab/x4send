@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Lettore e-ink con freccia di invio. Resta nella zona sicura (cerchio di 66dp al centro). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- corpo del lettore -->
+    <path android:fillColor="#CFC6E0" android:pathData="M38,25h22a5,5 0,0 1,5 5v44a5,5 0,0 1,-5 5h-22a5,5 0,0 1,-5 -5v-44a5,5 0,0 1,5 -5z" />
+    <!-- schermo -->
+    <path android:fillColor="#FAF8F3" android:pathData="M37,29h24v40h-24z" />
+    <!-- titolo e righe di testo -->
+    <path android:fillColor="#4A3F63" android:pathData="M40,33h12v3h-12z" />
+    <path android:fillColor="#A59DB5" android:pathData="M40,40h18v2h-18z M40,45h18v2h-18z M40,50h18v2h-18z M40,55h11v2h-11z" />
+    <path android:fillColor="#8E84A6" android:pathData="M45,72.5h8v2h-8z" />
+    <!-- distacco, cerchio e freccia di invio -->
+    <path android:fillColor="#2B1F4D" android:pathData="M48.5,67a15.5,15.5 0,1 0,31 0a15.5,15.5 0,1 0,-31 0z" />
+    <path android:fillColor="#D0BCFF" android:pathData="M51,67a13,13 0,1 0,26 0a13,13 0,1 0,-26 0z" />
+    <path android:fillColor="#2B1F4D" android:pathData="M64,58L71.5,65.5L67.5,65.5L67.5,75L60.5,75L60.5,65.5L56.5,65.5Z" />
+</vector>
